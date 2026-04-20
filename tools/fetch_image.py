@@ -14,6 +14,7 @@ import os
 import io
 import json
 import sqlite3
+
 from datetime import datetime, timezone
 
 try:
@@ -132,11 +133,8 @@ def fetch_images_for_drafts():
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Find drafts without images that have a matching summary entry with keywords
-    # image_keywords are stored in the drafts_summary JSON, but not in the DB directly.
-    # We store them in the draft body metadata. For simplicity, re-derive from headline.
     c.execute("""
-        SELECT id, headline, category, seo_description
+        SELECT id, headline, category, seo_description, image_keywords
         FROM drafts
         WHERE (wp_image_id IS NULL OR wp_image_id = 0)
           AND wp_post_id IS NULL
@@ -154,9 +152,16 @@ def fetch_images_for_drafts():
     for draft in drafts:
         print(f"\n  Draft {draft['id']}: \"{draft['headline'][:60]}\"")
 
-        # Build keywords from headline + category
-        words = [w for w in draft["headline"].split() if len(w) > 4][:3]
-        keywords = words + [draft.get("category", "")]
+        # Use Claude's image_keywords if available, otherwise fall back to headline words
+        raw_kw = draft.get("image_keywords")
+        if raw_kw:
+            try:
+                keywords = json.loads(raw_kw)[:3]
+            except Exception:
+                keywords = []
+        if not keywords:
+            words = [w for w in draft["headline"].split() if len(w) > 4][:3]
+            keywords = words + [draft.get("category", "")]
         print(f"    Keywords: {keywords}")
 
         photo = search_unsplash(keywords)

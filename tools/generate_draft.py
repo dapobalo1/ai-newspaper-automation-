@@ -184,17 +184,22 @@ def call_claude(user_prompt: str) -> dict:
 
 def save_draft(conn, article: dict, draft: dict, group_ids: list[int]) -> int:
     c = conn.cursor()
+    # Migrate existing DB if image_keywords column is missing
+    cols = {row[1] for row in c.execute("PRAGMA table_info(drafts)")}
+    if "image_keywords" not in cols:
+        c.execute("ALTER TABLE drafts ADD COLUMN image_keywords TEXT")
     c.execute("""
         INSERT INTO drafts
             (raw_article_ids, headline, body, category, seo_description,
-             status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending_editor', ?)
+             image_keywords, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending_editor', ?)
     """, (
         json.dumps(group_ids),
         draft["headline"],
         draft["body"],
         draft["category"],
         draft.get("seo_description", ""),
+        json.dumps(draft.get("image_keywords", [])),
         datetime.now(tz=timezone.utc).isoformat(),
     ))
     conn.commit()

@@ -6,8 +6,10 @@ Post status mapping:
   - pending_editor    → WordPress 'draft'    (awaiting editor review)
   - pending_publisher → WordPress 'pending'  (awaiting publisher approval)
 
-WordPress category IDs are fetched live from the API so they stay in sync
-with whatever categories exist on the site.
+Category routing for AI-generated content:
+  - ALL AI articles are always filed under "The Shoreline" (breaking news segment)
+  - A topic sub-category (Politics, Business, etc.) is added as a second category
+  - "The Pulse" and "Viewpoint" are human-written sections — AI articles NEVER go there
 
 Usage: python3 tools/publish_to_wordpress.py
 Requirements: WP_SITE_URL, WP_USERNAME, WP_APP_PASSWORD in .env
@@ -35,29 +37,77 @@ WP_CATEGORIES_URL = f"{WP_SITE_URL}/wp-json/wp/v2/categories"
 
 AUTH = (WP_USERNAME, WP_APP_PASS)
 
+# Primary section for ALL AI-generated content — never change this
+AI_PRIMARY_CATEGORY = "the shoreline"
+
+# Map Claude's category labels to WordPress category names
+# Claude outputs: Politics|Business|Sports|Technology|Culture|Diaspora|International|Nigeria
+CATEGORY_MAP = {
+    "politics":      "politics",
+    "business":      "business",
+    "sports":        "sports",
+    "technology":    "tech-tainment",
+    "culture":       "culture",
+    "diaspora":      "diaspora news",
+    "international": "international",
+    "nigeria":       "politics",   # Nigerian-specific stories fall under politics
+}
+
+# AI content is NEVER allowed in these sections (human-written only)
+BLOCKED_AI_CATEGORIES = {"the pulse", "pulse", "viewpoint", "opinion"}
+
 
 # ---------------------------------------------------------------------------
 # Category resolution
 # ---------------------------------------------------------------------------
 
 _category_cache: dict[str, int] = {}
+_slug_cache: dict[str, int] = {}
+
+
+def _load_categories():
+    global _category_cache, _slug_cache
+    if _category_cache:
+        return
+    try:
+        r = requests.get(WP_CATEGORIES_URL, params={"per_page": 100}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        for cat in r.json():
+            _category_cache[cat["name"].lower()] = cat["id"]
+            _slug_cache[cat["slug"].lower()] = cat["id"]
+    except Exception as e:
+        print(f"    WARN: Could not fetch WP categories: {e}")
 
 
 def get_wp_category_id(name: str) -> int | None:
-    """Return WordPress category ID for the given name (case-insensitive)."""
-    global _category_cache
+    """Return WordPress category ID by name or slug (case-insensitive)."""
+    _load_categories()
+    name_lower = name.lower()
+    return _category_cache.get(name_lower) or _slug_cache.get(name_lower)
 
-    if not _category_cache:
-        try:
-            r = requests.get(WP_CATEGORIES_URL, params={"per_page": 100}, auth=AUTH, timeout=15)
-            r.raise_for_status()
-            for cat in r.json():
-                _category_cache[cat["name"].lower()] = cat["id"]
-        except Exception as e:
-            print(f"    WARN: Could not fetch WP categories: {e}")
-            return None
 
-    return _category_cache.get(name.lower())
+def resolve_ai_categories(claude_category: str) -> list[int]:
+    """
+    Return the list of WP category IDs for an AI-generated article.
+    Always includes The Shoreline. Adds the topic sub-category if it exists.
+    Never includes blocked sections.
+    """
+    _load_categories()
+    ids = []
+
+    shoreline_id = get_wp_category_id(AI_PRIMARY_CATEGORY)
+    if shoreline_id:
+        ids.append(shoreline_id)
+    else:
+        print(f"    WARN: '{AI_PRIMARY_CATEGORY}' category not found in WordPress — article will be uncategorised.")
+
+    mapped = CATEGORY_MAP.get(claude_category.lower(), claude_category.lower())
+    if mapped and mapped not in BLOCKED_AI_CATEGORIES:
+        sub_id = get_wp_category_id(mapped)
+        if sub_id and sub_id not in ids:
+            ids.append(sub_id)
+
+    return ids
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +120,7 @@ def create_wp_post(draft: dict) -> int | None:
         print("    WARN: WordPress credentials not configured in .env — skipping.")
         return None
 
-    category_id = get_wp_category_id(draft.get("category", ""))
+    category_ids = resolve_ai_categories(draft.get("category", ""))
 
     body_with_attribution = (
         (draft.get("body") or "")
@@ -84,8 +134,10 @@ def create_wp_post(draft: dict) -> int | None:
         "excerpt": {"raw": draft.get("seo_description", "")},
     }
 
-    if category_id:
-        payload["categories"] = [category_id]
+    if category_ids:
+        payload["categories"] = category_ids
+        cat_names = [k for k, v in {**_category_cache, **_slug_cache}.items() if v in category_ids]
+        print(f"    Categories: {', '.join(cat_names)}")
 
     if draft.get("wp_image_id"):
         payload["featured_media"] = draft["wp_image_id"]

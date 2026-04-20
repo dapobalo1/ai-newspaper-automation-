@@ -93,7 +93,8 @@ Nothing is ever published without explicit human approval at two stages.
 │   ├── rank_stories.py           # Story scoring and selection
 │   ├── generate_draft.py         # Claude AI draft generation
 │   ├── fetch_image.py            # Unsplash image fetch + WP upload
-│   ├── publish_to_wordpress.py   # WordPress REST API integration
+│   ├── publish_to_wordpress.py   # WordPress REST API — always routes to "The Shoreline"
+│   ├── sync_youtube.py           # YouTube new video → WordPress draft
 │   ├── export_to_sheets.py       # Google Sheets export
 │   ├── check_approvals.py        # Read approvals from sheet → update DB
 │   ├── send_email.py             # Editor/publisher email notifications
@@ -180,6 +181,9 @@ crontab -e
 - **Story ranking** — prioritises by recency, source authority, and cross-source frequency
 - **Zero auto-publish** — every article requires human approval at editor and publisher level before going live
 - **Google Sheets approval** — editorial team reviews drafts in a familiar interface without needing WordPress access
+- **Category intelligence** — AI articles always route to "The Shoreline" (breaking news segment); The Pulse and Viewpoint (human-written only) are permanently blocked
+- **Royalty-free images** — Claude generates topic keywords; Unsplash finds the best match and attaches it as featured image
+- **YouTube sync** — new channel videos automatically create WordPress draft posts with embedded player
 
 ---
 

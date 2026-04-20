@@ -38,6 +38,7 @@ def init_db():
             body             TEXT,
             category         TEXT,
             seo_description  TEXT,
+            image_keywords   TEXT,
             wp_post_id       INTEGER,
             wp_image_id      INTEGER,
             status           TEXT DEFAULT 'pending_editor',

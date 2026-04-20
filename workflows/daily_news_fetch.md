@@ -117,7 +117,8 @@ python3 tools/publish_to_wordpress.py
 ```
 - Creates each draft as a WordPress `draft` post
 - Attaches featured image (if available)
-- Sets correct category using WP category API
+- **Category routing**: ALL AI articles are filed under "The Shoreline" (breaking news segment) + the relevant topic sub-category (Politics, Business, Sports, etc.)
+- **Blocked categories**: "The Pulse" and "Viewpoint" are human-written sections — AI articles are never assigned there
 - Updates `drafts.wp_post_id` in DB
 
 **If WP credentials missing**: Script warns and exits cleanly. Set credentials in `.env` and re-run.
@@ -172,6 +173,20 @@ python3 tools/send_email.py
 - **Reuters** DNS resolves inconsistently — dropped from sources. Add back when stable.
 - **Daily article limit**: Default is 8 to keep editor workload manageable. Adjust `DAILY_ARTICLE_LIMIT` in `.env`.
 - **Claude API**: ~$0.43/day at 8 articles. Check usage at console.anthropic.com.
+- **Category mapping**: WordPress category names must match exactly. If "The Shoreline" is missing from WP, articles will post as uncategorised. Verify category exists at WP Admin → Posts → Categories.
+- **YouTube sync**: Run `python3 tools/sync_youtube.py` separately (not part of the RSS pipeline). Can be scheduled at a different interval (e.g. every 6 hours).
+
+## YouTube Video Sync (Separate Tool)
+```bash
+python3 tools/sync_youtube.py
+```
+- Checks the client's YouTube channel for videos published in the last 24 hours
+- Creates a WordPress draft for each new video with an embedded player
+- Filed under "The Shoreline" category
+- Tracks synced videos in `raw_articles` (source='youtube') to avoid duplicates
+
+**Requires**: `YOUTUBE_API_KEY` and `YOUTUBE_CHANNEL_ID` in `.env`
+**Setup**: Enable YouTube Data API v3 in Google Cloud Console → APIs & Services → Library
 
 ## Output Files
 | File | Purpose |
