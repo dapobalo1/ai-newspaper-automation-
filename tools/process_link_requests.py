@@ -194,6 +194,59 @@ def update_row_status(service, row_index: int, status: str, wp_post_id: int | No
 
 
 # ---------------------------------------------------------------------------
+# URL type detection
+# ---------------------------------------------------------------------------
+
+TWITTER_DOMAINS = {"twitter.com", "x.com", "t.co"}
+BLOCKED_DOMAINS = {"instagram.com", "facebook.com", "fb.com", "tiktok.com",
+                   "linkedin.com", "threads.net", "snapchat.com"}
+
+OEMBED_URL = "https://publish.twitter.com/oembed"
+
+
+def detect_url_type(url: str) -> str:
+    """Return 'twitter', 'blocked_social', or 'article'."""
+    from urllib.parse import urlparse
+    domain = urlparse(url).netloc.lower().lstrip("www.")
+    if domain in TWITTER_DOMAINS:
+        return "twitter"
+    if domain in BLOCKED_DOMAINS:
+        return "blocked_social"
+    return "article"
+
+
+# ---------------------------------------------------------------------------
+# Twitter/X fetcher (uses public oEmbed — no API key required)
+# ---------------------------------------------------------------------------
+
+def fetch_tweet_content(url: str) -> tuple[str, str]:
+    """
+    Fetch tweet text via Twitter's public oEmbed endpoint.
+    Returns (author_line, tweet_text). Raises on failure.
+    """
+    r = requests.get(OEMBED_URL, params={"url": url, "omit_script": True}, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+
+    # oEmbed html looks like: <blockquote ...><p>tweet text</p>&mdash; Name (@handle)...
+    html = data.get("html", "")
+    soup = BeautifulSoup(html, "html.parser")
+
+    tweet_text = ""
+    p_tag = soup.find("p")
+    if p_tag:
+        tweet_text = p_tag.get_text(" ", strip=True)
+
+    author = data.get("author_name", "")
+    author_line = f"{author} (@{data.get('author_url', '').rstrip('/').split('/')[-1]})" if author else ""
+
+    if not tweet_text:
+        raise ValueError("Could not extract tweet text from oEmbed response.")
+
+    return author_line, tweet_text
+
+
+# ---------------------------------------------------------------------------
 # Article content fetcher
 # ---------------------------------------------------------------------------
 
@@ -251,14 +304,25 @@ def fetch_article_content(url: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def generate_draft_from_content(title: str, body: str, url: str,
-                                  client_notes: str) -> dict:
+                                  client_notes: str,
+                                  is_tweet: bool = False) -> dict:
     notes_block = f"\n\nClient notes: {client_notes}" if client_notes else ""
-    user_prompt = (
-        f"Rewrite the following article in Atlantic Digest's editorial voice.\n\n"
-        f"Source URL: {url}\n"
-        f"Original headline: {title}{notes_block}\n\n"
-        f"{body[:4000]}"  # cap to avoid token overflow
-    )
+
+    if is_tweet:
+        user_prompt = (
+            f"A tweet from {title} has been shared as a news item. "
+            f"Write a short Atlantic Digest news article reporting what was said. "
+            f"Attribute the statement clearly to the author. "
+            f"Source: {url}{notes_block}\n\n"
+            f"Tweet text: {body}"
+        )
+    else:
+        user_prompt = (
+            f"Rewrite the following article in Atlantic Digest's editorial voice.\n\n"
+            f"Source URL: {url}\n"
+            f"Original headline: {title}{notes_block}\n\n"
+            f"{body[:4000]}"
+        )
 
     response = AI_CLIENT.messages.create(
         model=MODEL,
@@ -408,10 +472,24 @@ def process_link_requests():
         row_ix = item["row"]
         print(f"[Row {row_ix}] {url[:80]}")
 
-        # 1. Fetch article content
+        # 1. Detect URL type and fetch content accordingly
+        url_type = detect_url_type(url)
+
+        if url_type == "blocked_social":
+            print(f"  SKIPPED: Instagram/Facebook/TikTok URLs cannot be scraped.")
+            print(f"  → Ask the client to share the original news article link instead.")
+            update_row_status(service, row_ix, "Skipped — paste original news article URL")
+            continue
+
+        is_tweet = url_type == "twitter"
+
         try:
-            title, body = fetch_article_content(url)
-            print(f"  Fetched: \"{title[:60]}\" ({len(body)} chars)")
+            if is_tweet:
+                title, body = fetch_tweet_content(url)
+                print(f"  Tweet by {title}: \"{body[:80]}...\"")
+            else:
+                title, body = fetch_article_content(url)
+                print(f"  Fetched: \"{title[:60]}\" ({len(body)} chars)")
         except Exception as e:
             print(f"  ERROR fetching URL: {e}")
             update_row_status(service, row_ix, "Error")
@@ -419,7 +497,7 @@ def process_link_requests():
 
         # 2. Generate draft via Claude
         try:
-            draft = generate_draft_from_content(title, body, url, notes)
+            draft = generate_draft_from_content(title, body, url, notes, is_tweet=is_tweet)
             print(f"  Draft: \"{draft.get('headline', '')[:60]}\"")
         except Exception as e:
             print(f"  ERROR generating draft: {e}")
