@@ -134,10 +134,9 @@ def fetch_images_for_drafts():
     c = conn.cursor()
 
     c.execute("""
-        SELECT id, headline, category, seo_description, image_keywords
+        SELECT id, headline, category, seo_description, image_keywords, wp_post_id
         FROM drafts
         WHERE (wp_image_id IS NULL OR wp_image_id = 0)
-          AND wp_post_id IS NULL
         ORDER BY id DESC
     """)
     drafts = [dict(r) for r in c.fetchall()]
@@ -153,6 +152,7 @@ def fetch_images_for_drafts():
         print(f"\n  Draft {draft['id']}: \"{draft['headline'][:60]}\"")
 
         # Use Claude's image_keywords if available, otherwise fall back to headline words
+        keywords = []
         raw_kw = draft.get("image_keywords")
         if raw_kw:
             try:
@@ -182,6 +182,21 @@ def fetch_images_for_drafts():
             )
             conn.commit()
             print(f"    ✓ Uploaded to WP media (id={wp_image_id})")
+
+            # If this draft is already a WP post, attach image as featured media now
+            wp_post_id = draft.get("wp_post_id")
+            if wp_post_id and all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
+                try:
+                    r = requests.patch(
+                        f"{WP_SITE_URL}/wp-json/wp/v2/posts/{wp_post_id}",
+                        auth=(WP_USERNAME, WP_APP_PASS),
+                        json={"featured_media": wp_image_id},
+                        timeout=15,
+                    )
+                    r.raise_for_status()
+                    print(f"    ✓ Featured image set on WP post {wp_post_id}")
+                except Exception as e:
+                    print(f"    WARN: Could not set featured image on WP post: {e}")
         else:
             print("    Upload skipped (credentials not set or error).")
 
