@@ -85,6 +85,7 @@ STRICT RULES:
 - Always paraphrase and synthesise
 - Never speculate beyond documented facts
 - Use phrases like "however," "questions remain," "at this stage" for journalistic caution
+- NEVER mention other news outlets or publications by name in the article body (e.g., do not write "according to Reuters," "as reported by Vanguard," "The Guardian said," etc.). Atlantic Digest is the publisher — write accordingly. Source credit belongs only in the source_attribution JSON field, not in the body.
 
 OUTPUT FORMAT (JSON only, no other text):
 {

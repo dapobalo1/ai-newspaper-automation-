@@ -7,7 +7,7 @@ Post status mapping:
   - pending_publisher → WordPress 'pending'  (awaiting publisher approval)
 
 Category routing for AI-generated content:
-  - ALL AI articles are always filed under "The Shoreline" (breaking news segment)
+  - ALL AI articles are always filed under "Breaking News" (feeds the site ticker + homepage section)
   - A topic sub-category (Politics, Business, etc.) is added as a second category
   - "The Pulse" and "Viewpoint" are human-written sections — AI articles NEVER go there
 
@@ -37,8 +37,13 @@ WP_CATEGORIES_URL = f"{WP_SITE_URL}/wp-json/wp/v2/categories"
 
 AUTH = (WP_USERNAME, WP_APP_PASS)
 
-# Primary section for ALL AI-generated content — never change this
-AI_PRIMARY_CATEGORY = "the shoreline"
+# Primary category for ALL AI-generated content — feeds the site ticker and Breaking News homepage section
+AI_PRIMARY_CATEGORY = "breaking news"
+
+# Also tag every AI-generated post with these so the newsletter RSS picks it up
+# and the owner can see at a glance which articles the workflow generated
+NEWSLETTER_CATEGORY_ID = 74   # "Daily Newsletter Update" — feeds the MailerLite RSS campaign
+AI_WORKFLOW_TAG_ID     = 86   # "AI Workflow" tag — distinguishes AI articles from human-written ones
 
 # Map Claude's category labels to WordPress category names
 # Claude outputs: Politics|Business|Sports|Technology|Culture|Diaspora|International|Nigeria
@@ -134,10 +139,17 @@ def create_wp_post(draft: dict) -> int | None:
         "excerpt": {"raw": draft.get("seo_description", "")},
     }
 
+    # Always include the newsletter category so articles appear in MailerLite's RSS feed
+    if NEWSLETTER_CATEGORY_ID not in category_ids:
+        category_ids.append(NEWSLETTER_CATEGORY_ID)
+
     if category_ids:
         payload["categories"] = category_ids
         cat_names = [k for k, v in {**_category_cache, **_slug_cache}.items() if v in category_ids]
         print(f"    Categories: {', '.join(cat_names)}")
+
+    # Tag as AI Workflow so owner can distinguish from human-written articles
+    payload["tags"] = [AI_WORKFLOW_TAG_ID]
 
     if draft.get("wp_image_id"):
         payload["featured_media"] = draft["wp_image_id"]

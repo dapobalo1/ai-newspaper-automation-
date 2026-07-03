@@ -38,46 +38,83 @@ WP_PENDING_URL = f"{WP_SITE_URL}/wp-admin/edit.php?post_status=pending&post_type
 # ---------------------------------------------------------------------------
 
 def build_html(subject_line: str, intro: str, articles: list[dict], cta_url: str, cta_label: str) -> str:
-    rows = ""
+    date_str = datetime.now().strftime("%A, %d %B %Y")
+
+    cards = ""
     for a in articles:
-        wp_link = f"{WP_SITE_URL}/wp-admin/post.php?post={a['wp_post_id']}&action=edit" if a.get("wp_post_id") else "#"
-        rows += f"""
-        <tr>
-          <td style="padding:10px 0;border-bottom:1px solid #eee;">
-            <strong><a href="{wp_link}" style="color:#1a1a1a;text-decoration:none;">{a['headline']}</a></strong><br>
-            <span style="color:#666;font-size:13px;">{a.get('category','')} &mdash; {a.get('seo_description','')[:80]}</span>
-          </td>
-        </tr>"""
+        wp_link  = f"{WP_SITE_URL}/wp-admin/post.php?post={a['wp_post_id']}&action=edit" if a.get("wp_post_id") else "#"
+        category = a.get("category", "")
+        desc     = a.get("seo_description", "")[:90]
+        cards += f"""
+        <div style="border:1px solid #e8ecf0;border-radius:8px;padding:18px 20px;
+                    margin-bottom:12px;background:#fff;">
+          <span style="display:inline-block;background:#f0f4ff;color:#3b5bdb;
+                       font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;
+                       text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">
+            {category}
+          </span>
+          <p style="margin:0 0 8px;">
+            <a href="{wp_link}"
+               style="font-size:16px;font-weight:700;color:#1a1a2e;text-decoration:none;
+                      line-height:1.4;">{a['headline']}</a>
+          </p>
+          <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.5;">{desc}</p>
+        </div>"""
 
     return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family:Georgia,serif;color:#1a1a1a;max-width:600px;margin:0 auto;padding:20px;">
-  <div style="border-top:4px solid #1a1a1a;padding-top:20px;margin-bottom:20px;">
-    <img src="{WP_SITE_URL}/wp-content/uploads/site-logo.png"
-         alt="News Publication" style="height:40px;" onerror="this.style.display='none'">
-    <h1 style="font-size:22px;margin:10px 0 4px;">{subject_line}</h1>
-    <p style="color:#666;font-size:14px;margin:0;">{datetime.now().strftime('%A, %d %B %Y')}</p>
-  </div>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f0f2f5;
+             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:40px 16px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0"
+       style="max-width:600px;width:100%;border-radius:12px;overflow:hidden;
+              box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-  <p style="font-size:16px;">{intro}</p>
+  <!-- Header -->
+  <tr><td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:36px 40px;">
+    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#64748b;
+              text-transform:uppercase;letter-spacing:1.5px;">Atlantic Digest · AI Workflow</p>
+    <h1 style="margin:0 0 10px;font-size:26px;font-weight:700;color:#ffffff;line-height:1.3;">
+      {subject_line}
+    </h1>
+    <p style="margin:0;font-size:14px;color:#8892b0;">{date_str}</p>
+  </td></tr>
 
-  <table width="100%" cellpadding="0" cellspacing="0">
-    {rows}
-  </table>
+  <!-- Body -->
+  <tr><td style="background:#f8fafc;padding:36px 40px;">
 
-  <div style="margin-top:24px;text-align:center;">
-    <a href="{cta_url}"
-       style="background:#1a1a1a;color:#fff;padding:12px 24px;
-              text-decoration:none;font-size:15px;display:inline-block;">
-      {cta_label}
-    </a>
-  </div>
+    <p style="margin:0 0 24px;font-size:16px;color:#444;line-height:1.75;">{intro}</p>
 
-  <p style="font-size:12px;color:#999;margin-top:30px;border-top:1px solid #eee;padding-top:12px;">
-    This notification was sent automatically by the Atlantic Digest AI workflow.
-    All articles require human review before publication.
-  </p>
+    {cards}
+
+    <!-- CTA -->
+    <div style="text-align:center;margin-top:28px;">
+      <a href="{cta_url}"
+         style="display:inline-block;background:#1a1a2e;color:#ffffff;
+                font-size:15px;font-weight:600;padding:15px 36px;border-radius:8px;
+                text-decoration:none;letter-spacing:0.4px;">
+        {cta_label}
+      </a>
+    </div>
+
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td style="background:#f0f2f5;padding:24px 40px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.8;">
+      All articles require human review before publication.<br>
+      Sent automatically &nbsp;·&nbsp; Atlantic Digest AI Workflow
+    </p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
 </body>
 </html>"""
 

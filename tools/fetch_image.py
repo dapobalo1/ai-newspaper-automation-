@@ -1,13 +1,14 @@
 """
 fetch_image.py
 For each draft in the DB with no image yet:
-  1. Searches Unsplash for a relevant image using the draft's image_keywords
-  2. Downloads the image
-  3. Uploads it to WordPress Media Library
+  1. Searches the WordPress Media Library for an existing relevant image (no upload needed)
+  2. Falls back to Unsplash if the media library has nothing relevant
+  3. Downloads and uploads the Unsplash image to WordPress
   4. Updates the draft record with wp_image_id
 
 Usage: python3 tools/fetch_image.py
-Requirements: UNSPLASH_ACCESS_KEY, WP_SITE_URL, WP_USERNAME, WP_APP_PASSWORD in .env
+Requirements: WP_SITE_URL, WP_USERNAME, WP_APP_PASSWORD in .env
+              UNSPLASH_ACCESS_KEY optional (fallback only)
 """
 
 import os
@@ -34,10 +35,44 @@ WP_APP_PASS  = os.getenv("WP_APP_PASSWORD", "")
 
 UNSPLASH_SEARCH = "https://api.unsplash.com/search/photos"
 WP_MEDIA_URL    = f"{WP_SITE_URL}/wp-json/wp/v2/media"
+AUTH            = (WP_USERNAME, WP_APP_PASS)
 
 
 # ---------------------------------------------------------------------------
-# Unsplash
+# WordPress Media Library search (primary source)
+# ---------------------------------------------------------------------------
+
+def search_wp_media(keywords: list[str]) -> int | None:
+    """
+    Search the WordPress media library for an existing image matching the keywords.
+    Returns wp_image_id if found, None otherwise.
+    Tries each keyword in turn and returns the first match.
+    """
+    if not all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
+        return None
+
+    for keyword in keywords[:3]:
+        try:
+            r = requests.get(
+                WP_MEDIA_URL,
+                auth=AUTH,
+                params={"search": keyword, "per_page": 5, "media_type": "image"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            results = r.json()
+            if results:
+                chosen = results[0]
+                print(f"    WP media match: [{chosen['id']}] {chosen['title']['rendered'][:50]}")
+                return chosen["id"]
+        except Exception as e:
+            print(f"    WP media search error: {e}")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Unsplash (fallback)
 # ---------------------------------------------------------------------------
 
 def search_unsplash(keywords: list[str]) -> dict | None:
@@ -102,7 +137,7 @@ def upload_to_wordpress(image_bytes: bytes, filename: str, mime_type: str,
     try:
         r = requests.post(
             WP_MEDIA_URL,
-            auth=(WP_USERNAME, WP_APP_PASS),
+            auth=AUTH,
             headers=headers,
             data=image_bytes,
             timeout=30,
@@ -114,7 +149,7 @@ def upload_to_wordpress(image_bytes: bytes, filename: str, mime_type: str,
         if alt_text:
             requests.post(
                 f"{WP_MEDIA_URL}/{wp_id}",
-                auth=(WP_USERNAME, WP_APP_PASS),
+                auth=AUTH,
                 json={"alt_text": alt_text},
                 timeout=10,
             )
@@ -164,41 +199,45 @@ def fetch_images_for_drafts():
             keywords = words + [draft.get("category", "")]
         print(f"    Keywords: {keywords}")
 
-        photo = search_unsplash(keywords)
-        if not photo:
-            print("    No image found.")
-            continue
+        # Step 1: Search existing WordPress media library
+        wp_image_id = search_wp_media(keywords)
 
-        print(f"    Found: {photo['urls']['regular'][:60]}...")
+        if not wp_image_id:
+            # Step 2: Fall back to Unsplash
+            print("    No match in WP media library — trying Unsplash ...")
+            photo = search_unsplash(keywords)
+            if not photo:
+                print("    No image found anywhere — skipping.")
+                continue
 
-        image_bytes, filename, mime = download_image(photo)
-        alt_text = f"{draft['headline']} — Photo credit: {photo['user']['name']} / Unsplash"
-
-        wp_image_id = upload_to_wordpress(image_bytes, filename, mime, alt_text)
-        if wp_image_id:
-            c.execute(
-                "UPDATE drafts SET wp_image_id = ? WHERE id = ?",
-                (wp_image_id, draft["id"])
-            )
-            conn.commit()
-            print(f"    ✓ Uploaded to WP media (id={wp_image_id})")
-
-            # If this draft is already a WP post, attach image as featured media now
-            wp_post_id = draft.get("wp_post_id")
-            if wp_post_id and all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
-                try:
-                    r = requests.patch(
-                        f"{WP_SITE_URL}/wp-json/wp/v2/posts/{wp_post_id}",
-                        auth=(WP_USERNAME, WP_APP_PASS),
-                        json={"featured_media": wp_image_id},
-                        timeout=15,
-                    )
-                    r.raise_for_status()
-                    print(f"    ✓ Featured image set on WP post {wp_post_id}")
-                except Exception as e:
-                    print(f"    WARN: Could not set featured image on WP post: {e}")
+            print(f"    Unsplash: {photo['urls']['regular'][:60]}...")
+            image_bytes, filename, mime = download_image(photo)
+            alt_text = f"{draft['headline']} — Photo credit: {photo['user']['name']} / Unsplash"
+            wp_image_id = upload_to_wordpress(image_bytes, filename, mime, alt_text)
+            if not wp_image_id:
+                print("    Upload failed — skipping.")
+                continue
+            print(f"    ✓ Unsplash image uploaded to WP media (id={wp_image_id})")
         else:
-            print("    Upload skipped (credentials not set or error).")
+            print(f"    ✓ Using existing WP media image (id={wp_image_id})")
+
+        # Save to DB and attach to WP post
+        c.execute("UPDATE drafts SET wp_image_id = ? WHERE id = ?", (wp_image_id, draft["id"]))
+        conn.commit()
+
+        wp_post_id = draft.get("wp_post_id")
+        if wp_post_id and all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
+            try:
+                r = requests.patch(
+                    f"{WP_SITE_URL}/wp-json/wp/v2/posts/{wp_post_id}",
+                    auth=(WP_USERNAME, WP_APP_PASS),
+                    json={"featured_media": wp_image_id},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                print(f"    ✓ Featured image set on WP post {wp_post_id}")
+            except Exception as e:
+                print(f"    WARN: Could not set featured image on WP post: {e}")
 
     conn.close()
     print("\nDone.")

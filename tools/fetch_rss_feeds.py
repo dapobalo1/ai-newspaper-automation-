@@ -26,14 +26,16 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AtlanticDigestBot/1.0)"}
 # ---------------------------------------------------------------------------
 
 SOURCES = [
-    {"name": "Vanguard Nigeria",   "url": "https://www.vanguardngr.com/feed/"},
-    {"name": "Daily Trust",        "url": "https://dailytrust.com/feed/"},
-    {"name": "Kyiv Independent",   "url": "https://kyivindependent.com/feed/rss/"},
-    {"name": "Al Jazeera",         "url": "https://www.aljazeera.com/xml/rss/all.xml"},
-    {"name": "Premium Times",      "url": "https://www.premiumtimesng.com/feed/"},
-    {"name": "BBC Africa",         "url": "https://feeds.bbci.co.uk/news/world/africa/rss.xml"},
-    {"name": "TechCabal",          "url": "https://techcabal.com/feed/"},
-    {"name": "ThisDay Live",       "url": "https://www.thisdaylive.com/index.php/feed/"},
+    {"name": "Vanguard Nigeria",    "url": "https://www.vanguardngr.com/feed/"},
+    {"name": "Daily Trust",         "url": "https://dailytrust.com/feed/"},
+    {"name": "Kyiv Independent",    "url": "https://kyivindependent.com/feed/rss/"},
+    {"name": "Al Jazeera",          "url": "https://www.aljazeera.com/xml/rss/all.xml"},
+    {"name": "Premium Times",       "url": "https://www.premiumtimesng.com/feed/"},
+    {"name": "BBC Africa",          "url": "https://feeds.bbci.co.uk/news/world/africa/rss.xml"},
+    {"name": "TechCabal",           "url": "https://techcabal.com/feed/"},
+    {"name": "ThisDay Live",        "url": "https://www.thisdaylive.com/index.php/feed/"},
+    {"name": "Sahara Reporters",    "url": "https://saharareporters.com/rss.xml"},
+    {"name": "Gazette Nigeria",     "url": "https://gazettengr.com/feed/"},
 ]
 
 TOPIC_KEYWORDS = {

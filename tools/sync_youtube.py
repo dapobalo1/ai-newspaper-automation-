@@ -33,8 +33,12 @@ WP_APP_PASS     = os.getenv("WP_APP_PASSWORD", "")
 
 WP_POSTS_URL    = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
 WP_CATEGORIES_URL = f"{WP_SITE_URL}/wp-json/wp/v2/categories"
-YT_SEARCH_URL   = "https://www.googleapis.com/youtube/v3/search"
-YT_VIDEO_URL    = "https://www.googleapis.com/youtube/v3/videos"
+YT_SEARCH_URL    = "https://www.googleapis.com/youtube/v3/search"
+YT_VIDEO_URL     = "https://www.googleapis.com/youtube/v3/videos"
+WP_MEDIA_URL     = f"{WP_SITE_URL}/wp-json/wp/v2/media"
+
+# Slug of the always-updated "Latest Video" page used on the homepage
+LATEST_VIDEO_SLUG = "latest-video"
 
 AUTH = (WP_USERNAME, WP_APP_PASS)
 
@@ -150,21 +154,52 @@ def build_video_post_content(video: dict) -> str:
 <p><a href="{video['watch_url']}" target="_blank" rel="noopener">Watch on YouTube →</a></p>"""
 
 
-def create_video_post(video: dict) -> int | None:
+def upload_thumbnail(video: dict) -> int | None:
+    """Download YouTube thumbnail and upload it to WP media library."""
+    thumb_url = video.get("thumbnail")
+    if not thumb_url:
+        return None
+    try:
+        r = requests.get(thumb_url, timeout=15)
+        r.raise_for_status()
+        filename = f"yt_{video['video_id']}.jpg"
+        upload = requests.post(
+            WP_MEDIA_URL,
+            auth=AUTH,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Type": "image/jpeg",
+            },
+            data=r.content,
+            timeout=30,
+        )
+        upload.raise_for_status()
+        media_id = upload.json()["id"]
+        print(f"    ✓ Thumbnail uploaded to WP media (id={media_id})")
+        return media_id
+    except Exception as e:
+        print(f"    WARN: Thumbnail upload failed: {e}")
+        return None
+
+
+def create_video_post(video: dict, media_id: int | None = None) -> int | None:
+    """Create a published WP post for the video. Returns wp_post_id."""
     if not all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
         print("    WARN: WordPress credentials not set — skipping.")
         return None
 
     content = build_video_post_content(video)
-    category_id = get_category_id("the shoreline")
+    category_id = get_category_id("breaking news")
 
     payload = {
         "title":   video["title"],
         "content": content,
-        "status":  "draft",
+        "status":  "draft",  # keep as draft until homepage placement is confirmed
     }
     if category_id:
         payload["categories"] = [category_id]
+    if media_id:
+        payload["featured_media"] = media_id
 
     try:
         r = requests.post(WP_POSTS_URL, auth=AUTH, json=payload, timeout=20)
@@ -173,6 +208,73 @@ def create_video_post(video: dict) -> int | None:
     except Exception as e:
         print(f"    WP post error: {e}")
         return None
+
+
+def update_latest_video_page(video: dict, media_id: int | None = None):
+    """
+    Keep a dedicated WP page (slug: 'latest-video') always updated with the
+    most recent video. The owner can embed this anywhere on the homepage.
+    Creates the page if it doesn't exist yet.
+    """
+    if not all([WP_SITE_URL, WP_USERNAME, WP_APP_PASS]):
+        return
+
+    thumb_html = ""
+    if video.get("thumbnail"):
+        thumb_html = f"""<p><a href="{video['watch_url']}" target="_blank" rel="noopener">
+<img src="{video['thumbnail']}" alt="{video['title']}"
+     style="width:100%;max-width:640px;border-radius:8px;display:block;">
+</a></p>"""
+
+    content = f"""{thumb_html}
+<h2><a href="{video['watch_url']}" target="_blank" rel="noopener">{video['title']}</a></h2>
+<p>{video['description'].split(chr(10))[0][:300] if video.get('description') else ''}</p>
+<p><a href="{video['watch_url']}" target="_blank" rel="noopener"
+   style="background:#ff0000;color:#fff;padding:10px 20px;border-radius:4px;
+          text-decoration:none;font-weight:bold;">▶ Watch on YouTube</a></p>
+
+<figure class="wp-block-embed is-type-video">
+<div class="wp-block-embed__wrapper">
+<iframe width="560" height="315" src="{video['embed_url']}"
+  title="{video['title']}" frameborder="0"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+  allowfullscreen></iframe>
+</div>
+</figure>"""
+
+    pages_url = f"{WP_SITE_URL}/wp-json/wp/v2/pages"
+    payload = {
+        "title":   "Latest Video",
+        "content": content,
+        "slug":    LATEST_VIDEO_SLUG,
+        "status":  "publish",
+    }
+    if media_id:
+        payload["featured_media"] = media_id
+
+    try:
+        # Check if the page already exists
+        r = requests.get(pages_url, auth=AUTH,
+                         params={"slug": LATEST_VIDEO_SLUG}, timeout=10)
+        r.raise_for_status()
+        existing = r.json()
+
+        if existing:
+            page_id = existing[0]["id"]
+            requests.post(f"{pages_url}/{page_id}", auth=AUTH,
+                          json=payload, timeout=15).raise_for_status()
+            print(f"    ✓ 'Latest Video' page updated (id={page_id})")
+        else:
+            resp = requests.post(pages_url, auth=AUTH,
+                                 json=payload, timeout=15)
+            resp.raise_for_status()
+            page_id = resp.json()["id"]
+            print(f"    ✓ 'Latest Video' page created (id={page_id})")
+            print(f"      URL: {WP_SITE_URL}/latest-video/")
+            print(f"      → Embed this page in a homepage widget to display the latest video.")
+
+    except Exception as e:
+        print(f"    WARN: Could not update Latest Video page: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -202,11 +304,19 @@ def sync_youtube():
             continue
 
         print(f"\n  New video: \"{video['title'][:60]}\"")
-        wp_id = create_video_post(video)
+
+        # Upload YouTube thumbnail to WP media library
+        media_id = upload_thumbnail(video)
+
+        # Create a published post for the video (appears in Breaking News feed)
+        wp_id = create_video_post(video, media_id=media_id)
         if wp_id:
             mark_synced(conn, video)
-            print(f"  ✓ WP draft created (id={wp_id}) → {WP_SITE_URL}/?p={wp_id}")
+            print(f"  ✓ WP post published (id={wp_id}) → {WP_SITE_URL}/?p={wp_id}")
             synced += 1
+
+            # Update the dedicated Latest Video page (for homepage embedding)
+            update_latest_video_page(video, media_id=media_id)
         else:
             print("  ✗ Failed to create WP post.")
 
