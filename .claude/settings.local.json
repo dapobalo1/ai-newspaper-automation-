@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(crontab -l)",
+      "Bash(launchctl unload *)",
+      "Bash(launchctl load *)",
+      "Bash(launchctl list *)",
+      "Bash(crontab -r)"
+    ]
+  }
+}
